@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/moonstream-labs/oc-dash/internal/log"
 )
 
 // EventCallback is called for each SSE event received.
@@ -17,13 +19,16 @@ type EventCallback func(event SSEvent)
 // event. It blocks until the context is cancelled or the connection drops.
 // On disconnect it will retry after a short delay.
 func (c *Client) SubscribeEvents(ctx context.Context, cb EventCallback) error {
+	l := log.Get().With("pkg", "sse")
 	for {
+		l.Debug("connecting to SSE stream")
 		err := c.readEventStream(ctx, cb)
 		if ctx.Err() != nil {
+			l.Info("SSE context cancelled")
 			return ctx.Err()
 		}
 		if err != nil {
-			// Brief backoff before reconnecting
+			l.Warn("SSE disconnected, reconnecting", "err", err.Error())
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -52,6 +57,9 @@ func (c *Client) readEventStream(ctx context.Context, cb EventCallback) error {
 		return fmt.Errorf("sse: status %d", resp.StatusCode)
 	}
 
+	l := log.Get().With("pkg", "sse")
+	l.Info("SSE stream connected")
+
 	scanner := bufio.NewScanner(resp.Body)
 	var eventType string
 	var dataLines []string
@@ -69,6 +77,7 @@ func (c *Client) readEventStream(ctx context.Context, cb EventCallback) error {
 				if evt.Type == "" {
 					evt.Type = "message"
 				}
+				l.Debug("SSE event", "type", evt.Type)
 				cb(evt)
 			}
 			eventType = ""
